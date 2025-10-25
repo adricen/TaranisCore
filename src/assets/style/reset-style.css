@@ -1,0 +1,75 @@
+/* Réinitialisation des marges, paddings et bordures */
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Suppression des styles par défaut pour les listes */
+ol,
+ul {
+    list-style: none;
+}
+
+/* Suppression des styles par défaut pour les liens */
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+/* Suppression des styles par défaut pour les boutons */
+button,
+input,
+textarea,
+select {
+    font: inherit;
+    color: inherit;
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0;
+    outline: none;
+}
+
+/* Suppression des styles par défaut pour les images */
+img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* Suppression des styles par défaut pour les tableaux */
+table {
+    border-collapse: collapse;
+    border-spacing: 0;
+}
+
+/* Réinitialisation des styles pour les titres et paragraphes */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+    font-size: inherit;
+    font-weight: inherit;
+}
+
+/* Réinitialisation des styles pour les balises HTML de base */
+html,
+body {
+    height: 100%;
+    font-size: 100%; /* 16px par défaut */
+    line-height: 1.5;
+    font-family: sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Réinitialisation des styles pour les éléments de formulaire */
+textarea {
+    resize: none;
+}
