@@ -38,10 +38,13 @@ class EntitySparseSet<
         this.sparse = new Int32Array(maxEntities).fill(-1);
         this.keys = new Array(maxEntities).fill(-1);
         this.freeList = [];
-        this.bitSet = new Array(maxEntities).fill({
-            Core: CoreMask.None,
-            Type: EntityTypeMask.None,
-        })
+        this.bitSet = new Array(maxEntities);
+        for (let i = 0; i < maxEntities; i++) {
+            this.bitSet[i] = {
+                Core: CoreMask.None,
+                Type: EntityTypeMask.None,
+            } as Record<keyof E, number >;
+        }
     }
     // #region ENTITIES
     /**
@@ -50,7 +53,7 @@ class EntitySparseSet<
      * Throws an error if the SparseSet is full.
      * @returns { number } new entityId
      */
-    createEntity(bitMask: Record<keyof E, number>): number {
+    createEntity(): number {
         if (this.isFull) {
             throw new Error("Cannot create more entities: SparseSet is full.");
         }
@@ -65,20 +68,19 @@ class EntitySparseSet<
         this.sparse[entityId] = denseIndex;
         this.keys[denseIndex] = entityId;
 
-        // Initialise le mask de l'entité
-        // this.bitSet[entityId] = mask ?? EntityTypeMask.None as E;
-        this.addMaskToEntity(entityId, bitMask);
-
         this.activeCount++;
         return entityId;
     }
 
     /**
-     * Returns a list of all active entity IDs.
-     * @returns {number[]} An array of active entity IDs.
+     * Creates multiple entities at once - more efficient than individual calls
      */
-    getAllEntities(): number[] {
-        return this.keys.filter(key => key !== -1);
+    createEntities(count: number): number[] {
+        const entities: number[] = [];
+        for (let i = 0; i < count; i++) {
+            entities.push(this.createEntity());
+        }
+        return entities;
     }
 
     /**
@@ -93,11 +95,20 @@ class EntitySparseSet<
         }
 
         const denseIndex = this.sparse[entityId];
+        const lastDenseIndex = this.activeCount - 1;
+        
+        // Swap if not deleting the last entity
+        if (denseIndex !== lastDenseIndex) {
+            const lastEntityId = this.keys[lastDenseIndex];
+            this.keys[denseIndex] = lastEntityId;
+            this.sparse[lastEntityId] = denseIndex;
+        }
 
         // Supprime l'entité des structures internes
         this.sparse[entityId] = -1;
-        this.bitSet[entityId] = EntityTypeMask.None as E; // Réinitialise le mask
-        this.keys[denseIndex] = -1;
+        for(let key in this.bitSet[entityId]) {
+            this.bitSet[entityId][key] = 0; // reset all masks to none
+        }
 
         // Ajoute l'indice dense à la freeList pour réutilisation
         this.freeList.push(entityId);
@@ -105,11 +116,34 @@ class EntitySparseSet<
     }
 
     /**
+     * Deletes multiple entities at once
+     */
+    deleteEntities(entityIds: number[]): void {
+        // Sort by dense index descending to avoid index shifting issues
+        const validIds = entityIds.filter(id => this.entityExist(id));
+        validIds.sort((a, b) => this.sparse[b] - this.sparse[a]);
+        
+        for (const entityId of validIds) {
+            this.deleteEntity(entityId);
+        }
+    }
+
+    /**
+     * Returns a list of all active entity IDs.
+     * @returns {number[]} An array of active entity IDs.
+     */
+    getAllEntities(): number[] {
+        return this.keys.slice(0, this.activeCount);
+    }
+
+    
+
+    /**
      * Checks if an entity exists in the SparseSet.
      * @param entityId - The ID of the entity to check.
      * @returns {boolean} True if the entity exists, false otherwise.
      */
-    hasEntity(entityId: number): boolean {
+    entityExist(entityId: number): boolean {
         return entityId >= 0 && entityId < this.sparse.length && this.sparse[entityId] !== -1;
     }
     // #endregion
@@ -120,27 +154,29 @@ class EntitySparseSet<
      * @param entityId 
      * @param mask 
      */
-    addMaskToEntity(entityId: number, mask: E): void {
-        if (!this.hasEntity(entityId)) {
+    addMaskToEntity(entityId: number, mask: Partial<Record<keyof E, number>>): void {
+        if (!this.entityExist(entityId)) {
             throw new Error(`Entity ${entityId} does not exist.`);
         }
-        this.bitSet[entityId] = (this.bitSet[entityId] | mask) as E;
-    }
-    
-    updateMask(entityId: number, mask: E): void {
-        if (!this.hasEntity(entityId)) {
-            throw new Error(`Entity ${entityId} does not exist.`);
+        for(let key in mask) {
+            if (mask[key] !== undefined) {
+                this.bitSet[entityId][key] |= mask[key];
+            }
         }
-        this.bitSet[entityId] = mask;
     }
+    // #endregion
 
+    // #region QUERYING
     /**
      * Return the type Mask of an entity
      * Useffull to get to be sure of an entity type
      * @param entityId 
      * @returns 
      */
-    getMask(entityId: number): E {
+    getMask(entityId: number): Record<keyof E, number> {
+        if (!this.entityExist(entityId)) {
+            throw new Error(`Entity ${entityId} does not exist.`);
+        }
         return this.bitSet[entityId];
     }
 
@@ -149,13 +185,40 @@ class EntitySparseSet<
      * @param mask - The mask to filter entities by - can be combineed mask
      * @returns 
      */
-    getAllByMask(mask: E): number[] {
+    /**
+     * Get all entities that match ALL specified masks (AND operation).
+     * Most efficient querying - only checks active entities.
+     * @param masks - Object specifying which masks to match
+     * @returns Array of entity IDs that match ALL specified masks
+     */
+    getAllByMask(masks: Partial<Record<keyof E, number>>, maxResults?: number): number[] {
         const result: number[] = [];
-        for (let i = 0; i < this.bitSet.length; i++) {
-            if ((this.bitSet[i] & mask) !== 0) {
-                result.push(i);
+        const keysToCheck = (Object.keys(masks) as Array<keyof E>).filter(key => masks[key] !== undefined);
+        
+        if (keysToCheck.length === 0) {
+            return this.getAllEntities(); // No masks = all entities
+        }
+        
+        for (let i = 0; i < this.activeCount; i++) {
+            const entityId = this.keys[i];
+            const entityMasks = this.bitSet[entityId];
+            
+            let matches = true;
+            for (const key of keysToCheck) {
+                if ((entityMasks[key] & masks[key]!) !== masks[key]!) {
+                    matches = false;
+                    break;
+                }
+            }
+            
+            if (matches) {
+                result.push(entityId);
+                if (maxResults && result.length >= maxResults) {
+                    break; // Early termination
+                }
             }
         }
+        
         return result;
     }
 
@@ -164,10 +227,21 @@ class EntitySparseSet<
      * @param mask 
      * @returns 
      */
-    getFirstByMaks(mask: E): number | null {
-        for (let i = 0; i < this.bitSet.length; i++) {
-            if ((this.bitSet[i] & mask) !== 0) {
-                return i;
+    getFirstByMask(masks: Partial<Record<keyof E, number>>): number | null {
+        for (let i = 0; i < this.activeCount; i++) {
+            const entityId = this.keys[i];
+            const entityMasks = this.bitSet[entityId];
+            
+            let matches = true;
+            for (const key in masks) {
+                if (masks[key] !== undefined && (entityMasks[key] & masks[key]) !== masks[key]) {
+                    matches = false;
+                    break;
+                }
+            }
+            
+            if (matches) {
+                return entityId;
             }
         }
         return null;
@@ -179,42 +253,34 @@ class EntitySparseSet<
      * @param entityId 
      * @param mask 
      */
-    removeMaskFromEntity(entityId: number, mask: E): void {
-        if (!this.hasEntity(entityId)) {
+    removeMaskFromEntity(entityId: number, masks: Partial<Record<keyof E, number>>): void {
+        if (!this.entityExist(entityId)) {
             throw new Error(`Entity ${entityId} does not exist.`);
         }
-        this.bitSet[entityId] = (this.bitSet[entityId] & ~mask) as E;
-    }
-    // #endregion
-    // #region UTILS
-    
-    /**
-     * Compacts the SparseSet by removing gaps left by deleted entities.
-     * This operation is optional and can be used to optimize memory usage.
-     * Note: Compacting changes the dense indices of entities, so use with caution.
-     * @deprecated probably not needed and bug prone
-     */
-    compact(): void {
-        const newBitSet: number[] = [];
-        const newFreeList: number[] = [];
-
-        for (let i = 0; i < this.bitSet.length; i++) {
-            if (this.bitSet[i] !== EntityTypeMask.None) {
-                newBitSet.push(this.bitSet[i]);
-            } else {
-                newFreeList.push(i);
+        
+        for (const key in masks) {
+            if (masks[key] !== undefined) {
+                this.bitSet[entityId][key] &= ~masks[key]; // Remove specific bits
             }
         }
-
-        this.bitSet = newBitSet as E[];
-        this.freeList = newFreeList;
     }
-
+    // #endregion
+    // #region UTILS & DEBUGGING
+    
     clear(): void {
         this.sparse.fill(-1);
         this.keys.fill(-1);
         this.freeList = [];
         this.nextItemId = 0;
+        this.activeCount = 0; // ← Missing!
+        
+        // Optional: Reset bitsets too
+        for (let i = 0; i < this.bitSet.length; i++) {
+            this.bitSet[i] = {
+                Core: CoreMask.None,
+                Type: EntityTypeMask.None,
+            } as Record<keyof E, number>;
+        }
     }
 
     /**
@@ -232,16 +298,106 @@ class EntitySparseSet<
         return this.nextItemId >= this.sparse.length && this.freeList.length === 0;
     }
 
+    /**
+     * Returns comprehensive debug information about the EntitySparseSet.
+     * Useful for debugging, testing, and development analysis.
+     * @returns Debug information object
+    */
+    getDebugInfo() {
+        return {
+            // Basic stats
+            capacity: this.capacity(),
+            activeEntities: this.activeCount,
+            nextEntityId: this.nextItemId,
+            
+            // Memory usage
+            memoryUsagePercent: Math.round((this.activeCount / this.capacity()) * 100 * 100) / 100,
+            
+            // Free list info
+            freeListSize: this.freeList.length,
+            freeList: [...this.freeList], // Copy to prevent external mutation
+            
+            // Entity distribution
+            activeEntityIds: this.getAllEntities(),
+            
+            // Internal arrays (for deep debugging)
+            sparse: Array.from(this.sparse), // Convert Int32Array to regular array
+            keys: this.keys.slice(0, this.activeCount), // Only active portion
+            
+            // Fragmentation analysis
+            largestGapInSparse: this.getLargestGapInSparse(),
+            
+            // Validation
+            isValid: this.validateInternalState()
+        };
+    }
+
+    /**
+     * Returns essential performance statistics.
+     * Lightweight version suitable for production monitoring.
+     * @returns Essential stats object
+     */
     getStats() {
-        const sparseListLenght = this.sparse.filter(key => key !== -1).length;
         return {
             capacity: this.capacity(),
-            size: this.activeCount,
-            used: sparseListLenght,
-            sparseList: this.sparse,
-            freeListLenght: this.freeList.length,
-            freeList: this.freeList,
+            activeEntities: this.activeCount,
+            freeSlots: this.freeList.length,
+            memoryUsage: Math.round((this.activeCount / this.capacity()) * 100 * 100) / 100,
+            isFull: this.isFull
         };
+    }
+
+    /**
+     * Validates the internal state of the SparseSet.
+     * Useful for debugging and testing.
+     * @returns True if the internal state is valid
+     */
+    private validateInternalState(): boolean {
+        try {
+            // Check if activeCount matches actual active entities
+            let actualActiveCount = 0;
+            for (let i = 0; i < this.sparse.length; i++) {
+                if (this.sparse[i] !== -1) {
+                    actualActiveCount++;
+                }
+            }
+            
+            if (actualActiveCount !== this.activeCount) {
+                return false;
+            }
+            
+            // Check sparse-dense invariant
+            for (let i = 0; i < this.activeCount; i++) {
+                const entityId = this.keys[i];
+                if (this.sparse[entityId] !== i) {
+                    return false;
+                }
+            }
+            
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Finds the largest gap in entity ID allocation.
+     * Higher gaps might indicate fragmentation.
+     */
+    private getLargestGapInSparse(): number {
+        let maxGap = 0;
+        let currentGap = 0;
+        
+        for (let i = 0; i < this.nextItemId; i++) {
+            if (this.sparse[i] === -1) {
+                currentGap++;
+            } else {
+                maxGap = Math.max(maxGap, currentGap);
+                currentGap = 0;
+            }
+        }
+        
+        return Math.max(maxGap, currentGap);
     }
     // #endregion
 }
