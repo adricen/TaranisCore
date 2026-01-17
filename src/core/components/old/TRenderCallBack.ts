@@ -1,1 +1,0 @@
-export type TRenderCallback = (ctx: CanvasRenderingContext2D) => void;

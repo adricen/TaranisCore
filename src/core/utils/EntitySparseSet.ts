@@ -1,4 +1,6 @@
 import { EntityTypeMask } from "@/core/utils/EntityTypeMask";
+import type { GlobalFamilyType } from "core/bitmasks/GlobalFamilyType";
+import { CoreMask } from "../bitmasks/CoreMask";
 
 // TODO: Test and validate this class
 /**
@@ -9,7 +11,7 @@ import { EntityTypeMask } from "@/core/utils/EntityTypeMask";
  * and fast access to entities
  */
 class EntitySparseSet<
-    E extends EntityTypeMask = EntityTypeMask,
+    E extends GlobalFamilyType = GlobalFamilyType, // change this with 
 > {
     /**
      * sparse is an array where the index represents the entity ID
@@ -24,9 +26,9 @@ class EntitySparseSet<
      */
     protected freeList: number[];
     /**
-     * bitSet is an array where each index corresponds to an entity ID and holds its mask (bitflags)
+     * bitSet is an arry of object that allow to store each entitys bitset mask
     */
-    protected bitSet: E[]; 
+    protected bitSet: Array<Record<keyof E, number >>
     // create a new entity ID when necessary
     protected nextItemId: number = 0;
     // total number of items in the sparse set
@@ -36,7 +38,10 @@ class EntitySparseSet<
         this.sparse = new Int32Array(maxEntities).fill(-1);
         this.keys = new Array(maxEntities).fill(-1);
         this.freeList = [];
-        this.bitSet = new Array<E>(maxEntities).fill(EntityTypeMask.None as E); // Initialisation des masks à 0
+        this.bitSet = new Array(maxEntities).fill({
+            Core: CoreMask.None,
+            Type: EntityTypeMask.None,
+        })
     }
     // #region ENTITIES
     /**
@@ -45,7 +50,7 @@ class EntitySparseSet<
      * Throws an error if the SparseSet is full.
      * @returns { number } new entityId
      */
-    createEntity(mask?: E): number {
+    createEntity(bitMask: Record<keyof E, number>): number {
         if (this.isFull) {
             throw new Error("Cannot create more entities: SparseSet is full.");
         }
@@ -61,7 +66,8 @@ class EntitySparseSet<
         this.keys[denseIndex] = entityId;
 
         // Initialise le mask de l'entité
-        this.bitSet[entityId] = mask ?? EntityTypeMask.None as E;
+        // this.bitSet[entityId] = mask ?? EntityTypeMask.None as E;
+        this.addMaskToEntity(entityId, bitMask);
 
         this.activeCount++;
         return entityId;

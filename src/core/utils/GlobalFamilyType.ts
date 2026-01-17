@@ -1,10 +1,10 @@
 import { TransformMask } from "core/components/BitMasks/TransformMask";
 import { CoreMask } from "core/components/BitMasks/CoreMask";
-import type { Position } from "core/components/Position";
-import type { Rotation } from "core/components/Rotation";
-import type { Scale } from "core/components/Scale";
-import type { Visible } from "core/components/Visible";
-import type { HtmlElementContainer } from "../components/HtmlElementContainer";
+import type { Position } from "@/core/components/core/Position";
+import type { Rotation } from "@/core/components/core/Rotation";
+import type { Scale } from "@/core/components/core/Scale";
+import type { Visible } from "@/core/components/core/Visible";
+import type { HtmlElementContainer } from "../components/core/HtmlElementContainer";
 
 /**
  * The ECS (Entity-Component-System) class is the core of the framework.

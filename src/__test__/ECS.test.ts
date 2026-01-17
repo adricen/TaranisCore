@@ -9,7 +9,7 @@ describe('ECS', () => {
     beforeEach(() => {
         ecs = new ECS();
     });
-
+    // #region Entity Tests
     it('Should create an entity with no component', () => {
         const entityId = ecs.createEntity();
         expect(ecs.hasEntity(entityId)).toBe(true);
@@ -169,4 +169,8 @@ describe('ECS', () => {
         expect(ecs.getComponent(entityId1, 'Transform', TransformMask.Position)).toEqual(position);
         expect(ecs.getComponent(entityId2, 'Transform', TransformMask.Position)).toEqual(position);
     });
+    // #region Queries Tests
+    // it('should add some new famuly', () => {
+
+    // });
 });

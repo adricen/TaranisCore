@@ -17,7 +17,9 @@
     "paths": {
       "@/*": ["./src/*"],
       "commons/*": ["./src/core/commons/*"],
-      "core/*": ["./src/core/*"]
+      "core/*": ["./src/core/*"],
+      "components/*": ["./src/core/components/*"],
+
     },
 
     /* Linting */

@@ -3,8 +3,8 @@ import { CoreMask } from "@/core/bitmasks/CoreMask";
 import { TransformMask } from "@/core/bitmasks/TransformMask";
 import type { System } from "@/core/systems/System";
 import type { ECS } from "@/core/ECS";
-import type { HtmlElementContainer } from "@/core/components/HtmlElementContainer";
-import type { Position } from "@/core/components/Position";
+import type { HtmlElementContainer } from "@/core/components/core/HtmlElementContainer";
+import type { Position } from "@/core/components/core/Position";
 
 class Mouse2DSystem<T extends ECS> implements System {
     

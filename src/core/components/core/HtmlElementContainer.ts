@@ -1,3 +1,3 @@
 export type HtmlElementContainer = {
-    element: HTMLElement | null;
+    element: HTMLElement;
 }

@@ -2,7 +2,7 @@ import { EntityTypeMask } from "@/core/utils/EntityTypeMask";
 import { System } from "@/core/systems/System";
 import { CoreMask } from "@/core/bitmasks/CoreMask";
 import type { ECS } from "@/core/ECS";
-import type { HtmlElementContainer } from "@/core/components/HtmlElementContainer";
+import type { HtmlElementContainer } from "@/core/components/core/HtmlElementContainer";
 
 class Canvas2DSystem<E extends ECS> implements System {
     protected ecs: E;

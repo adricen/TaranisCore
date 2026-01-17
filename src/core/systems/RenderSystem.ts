@@ -2,7 +2,7 @@ import type { ECS } from "@/core/ECS";
 import type { System } from "@/core/systems/System";
 import { EntityTypeMask } from "../utils/EntityTypeMask";
 import { CoreMask } from "../bitmasks/CoreMask";
-import type { HtmlElementContainer } from "../components/HtmlElementContainer";
+import type { HtmlElementContainer } from "../components/core/HtmlElementContainer";
 
 /**
  * The RenderSystem is responsible for rendering the game entities on the canvas.
