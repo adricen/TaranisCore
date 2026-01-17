@@ -80,6 +80,9 @@ class EntitySparseSet<
         for (let i = 0; i < count; i++) {
             entities.push(this.createEntity());
         }
+        if (this.queryCache.size > 0) {
+            this.clearQueryCache(); // Invalidate cache when world changes
+        }
         return entities;
     }
 
@@ -113,6 +116,9 @@ class EntitySparseSet<
         // Ajoute l'indice dense à la freeList pour réutilisation
         this.freeList.push(entityId);
         this.activeCount--;
+        if (this.queryCache.size > 0) {
+            this.clearQueryCache(); // Invalidate cache when world changes
+        }
     }
 
     /**
@@ -163,6 +169,32 @@ class EntitySparseSet<
                 this.bitSet[entityId][key] |= mask[key];
             }
         }
+        if (this.queryCache.size > 0) {
+            this.clearQueryCache(); // Invalidate cache when masks change
+        }
+    }
+
+    /**
+     * Process multiple entities at once with batch operations
+     */
+    addMaskToEntities(entityIds: number[], mask: Partial<Record<keyof E, number>>): void {
+        const keys = Object.keys(mask) as Array<keyof E>;
+        
+        // Process in batches of 8 for better cache locality
+        for (let i = 0; i < entityIds.length; i += 8) {
+            const end = Math.min(i + 8, entityIds.length);
+            
+            for (let j = i; j < end; j++) {
+                const entityId = entityIds[j];
+                if (this.entityExist(entityId)) {
+                    for (const key of keys) {
+                        if (mask[key] !== undefined) {
+                            this.bitSet[entityId][key] |= mask[key];
+                        }
+                    }
+                }
+            }
+        }
     }
     // #endregion
 
@@ -180,46 +212,79 @@ class EntitySparseSet<
         return this.bitSet[entityId];
     }
 
-    /**
-     * get all entity that match the given mask.
-     * @param mask - The mask to filter entities by - can be combineed mask
-     * @returns 
-     */
+    // Add this property to your class
+    private queryCache = new Map<string, { result: number[], timestamp: number }>();
+
     /**
      * Get all entities that match ALL specified masks (AND operation).
      * Most efficient querying - only checks active entities.
      * @param masks - Object specifying which masks to match
+     * @param maxResults - Optional limit on number of results
+     * @param useCache - Enable caching for repeated queries (useful for systems that query every frame)
      * @returns Array of entity IDs that match ALL specified masks
      */
-    getAllByMask(masks: Partial<Record<keyof E, number>>, maxResults?: number): number[] {
+    getAllByMask(masks: Partial<Record<keyof E, number>>, maxResults?: number, useCache = false): number[] {
+        // Check cache first if enabled
+        if (useCache) {
+            const cacheKey = JSON.stringify(masks);
+            const cached = this.queryCache.get(cacheKey);
+            if (cached && Date.now() - cached.timestamp < 16) { // Cache for ~1 frame (16ms)
+                return maxResults ? cached.result.slice(0, maxResults) : cached.result;
+            }
+        }
+        
+        // Perform the actual query (your existing logic)
         const result: number[] = [];
         const keysToCheck = (Object.keys(masks) as Array<keyof E>).filter(key => masks[key] !== undefined);
-        
-        if (keysToCheck.length === 0) {
-            return this.getAllEntities(); // No masks = all entities
-        }
         
         for (let i = 0; i < this.activeCount; i++) {
             const entityId = this.keys[i];
             const entityMasks = this.bitSet[entityId];
             
-            let matches = true;
+            let allMatch = 1; // Use bitwise flags instead of boolean
             for (const key of keysToCheck) {
-                if ((entityMasks[key] & masks[key]!) !== masks[key]!) {
-                    matches = false;
-                    break;
-                }
+                allMatch &= ((entityMasks[key] & masks[key]!) === masks[key]!) ? 1 : 0;
             }
             
-            if (matches) {
+            if (allMatch) {
                 result.push(entityId);
+                // Early exit if we hit maxResults
                 if (maxResults && result.length >= maxResults) {
-                    break; // Early termination
+                    break;
                 }
             }
         }
         
+        // Store in cache if enabled (don't cache partial results from maxResults)
+        if (useCache && !maxResults) {
+            const cacheKey = JSON.stringify(masks);
+            this.queryCache.set(cacheKey, { 
+                result: [...result], // Copy to prevent external mutation
+                timestamp: Date.now() 
+            });
+        }
+        
         return result;
+    }
+
+    /**
+     * Clears the query cache. Call this when entities are created/deleted/modified
+     * to ensure cache consistency.
+     */
+    clearQueryCache(): void {
+        this.queryCache.clear();
+    }
+
+    /**
+     * Clear old cache entries (call periodically to prevent memory leaks)
+     */
+    private cleanupQueryCache(): void {
+        const now = Date.now();
+        for (const [key, value] of this.queryCache.entries()) {
+            if (now - value.timestamp > 100) { // Remove entries older than 100ms
+                this.queryCache.delete(key);
+            }
+        }
     }
 
     /**
@@ -246,6 +311,21 @@ class EntitySparseSet<
         }
         return null;
     }
+    /**
+     * Specialized version for single-mask queries (most common case)
+     */
+    getAllByCoreMask(coreMask: number): number[] {
+        const result: number[] = [];
+        
+        for (let i = 0; i < this.activeCount; i++) {
+            const entityId = this.keys[i];
+            if ((this.bitSet[entityId].Core & coreMask) === coreMask) {
+                result.push(entityId);
+            }
+        }
+        
+        return result;
+    }
 
 
     /**
@@ -266,7 +346,12 @@ class EntitySparseSet<
     }
     // #endregion
     // #region UTILS & DEBUGGING
-    
+    private resetBitset(bitset: Record<keyof E, number>): void {
+        (Object.keys(bitset) as Array<keyof E>).forEach(key => {
+            bitset[key] = 0;
+        });
+    }
+
     clear(): void {
         this.sparse.fill(-1);
         this.keys.fill(-1);
@@ -276,10 +361,7 @@ class EntitySparseSet<
         
         // Optional: Reset bitsets too
         for (let i = 0; i < this.bitSet.length; i++) {
-            this.bitSet[i] = {
-                Core: CoreMask.None,
-                Type: EntityTypeMask.None,
-            } as Record<keyof E, number>;
+            this.resetBitset(this.bitSet[i]); // Reuse instead of recreate
         }
     }
 
